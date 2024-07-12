@@ -5,9 +5,9 @@
  */
 
 #include <kernel.h>
-#include <drivers/sensor.h>
+#include <zephyr/drivers/sensor.h>
 #include <init.h>
-#include <drivers/gpio.h>
+#include <zephyr/drivers/gpio.h>
 #include <sys/byteorder.h>
 #include <sys/__assert.h>
 
