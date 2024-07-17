@@ -7,9 +7,9 @@
 #define ZEPHYR_DRIVERS_SENSOR_BNO055_BNO055_H_
 
 #include <zephyr/types.h>
-#include <device.h>
-#include <devicetree.h>
-#include <drivers/i2c.h>
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/drivers/i2c.h>
 
 #define DT_DRV_COMPAT bosch_bno055
 
@@ -48,6 +48,19 @@ struct bno055_euler_double_t {
 	double h;
 	double r;
 	double p;
+};
+
+struct bno055_quaternion_t {
+	int16_t w;
+	int16_t x;
+	int16_t y;
+	int16_t z;
+};
+
+struct bno055_accel_t {
+	int16_t x;
+	int16_t y;
+	int16_t z;
 };
 
 

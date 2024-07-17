@@ -15,4 +15,5 @@ source "drivers/sensor/bosch/bmi323/Kconfig"
 source "drivers/sensor/bosch/bmm150/Kconfig"
 source "drivers/sensor/bosch/bmp388/Kconfig"
 source "drivers/sensor/bosch/bmp581/Kconfig"
+source "drivers/sensor/bosch/bno055/Kconfig"
 # zephyr-keep-sorted-stop
