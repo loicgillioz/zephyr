@@ -1,0 +1,14 @@
+# Binding for NXP PCA9539
+
+description: NXP PCA9539 binding
+
+compatible: "nxp,pca9539"
+
+include: nxp,pca953x-base.yaml
+
+properties:
+  ngpios:
+    const: 16
+
+child-binding:
+  compatible: "nxp,pca9539-gpio"

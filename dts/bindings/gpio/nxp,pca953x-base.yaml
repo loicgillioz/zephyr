@@ -1,0 +1,30 @@
+# Copyright (c) 2019 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
+description: PCA953x series I2C-based GPIO expander
+
+compatible: "nxp,pca953x"
+
+include: [gpio-controller.yaml, i2c-device.yaml]
+
+properties:
+  has-pud:
+    type: boolean
+    description: Supports pull-up/pull-down
+
+  has-interrupt-mask-reg:
+    type: boolean
+    description: Has Interrupt mask register (PCAL95xx)
+
+  interrupt-gpios:
+    type: phandle-array
+    description: Interrupt GPIO pin (active-low open-drain)
+
+  "#gpio-cells":
+    const: 3
+
+gpio-cells:
+  - port
+  - pin
+  - flags
+
