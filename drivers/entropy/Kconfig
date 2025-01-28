@@ -26,6 +26,7 @@ source "drivers/entropy/Kconfig.mcux"
 source "drivers/entropy/Kconfig.stm32"
 source "drivers/entropy/Kconfig.esp32"
 source "drivers/entropy/Kconfig.nrf5"
+source "drivers/entropy/Kconfig.nrf_cracen"
 source "drivers/entropy/Kconfig.sam"
 source "drivers/entropy/Kconfig.smartbond"
 source "drivers/entropy/Kconfig.native_posix"
@@ -36,6 +37,8 @@ source "drivers/entropy/Kconfig.neorv32"
 source "drivers/entropy/Kconfig.bt_hci"
 source "drivers/entropy/Kconfig.psa_crypto"
 source "drivers/entropy/Kconfig.npcx"
+source "drivers/entropy/Kconfig.max32"
+source "drivers/entropy/Kconfig.renesas_ra"
 
 config ENTROPY_HAS_DRIVER
 	bool

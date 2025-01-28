@@ -74,12 +74,12 @@ struct ptp_port_addr {
 } __packed;
 
 /**
- * @brief Structure for PTP Clock quality metrices.
+ * @brief Structure for PTP Clock quality metrics.
  * @note 5.3.7 - quality of a clock
  */
 struct ptp_clk_quality {
 	/** PTP Clock's class */
-	uint8_t  class;
+	uint8_t  cls;
 	/** Accuracy of the PTP Clock. */
 	uint8_t  accuracy;
 	/** Value representing stability of the Local PTP Clock. */

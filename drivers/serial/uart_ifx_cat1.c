@@ -153,11 +153,14 @@ static uint32_t _convert_uart_data_bits_z_to_cyhal(enum uart_config_data_bits da
 
 static int32_t _get_hw_block_num(CySCB_Type *reg_addr)
 {
+	extern const uint8_t _CYHAL_SCB_BASE_ADDRESS_INDEX[_SCB_ARRAY_SIZE];
+	extern CySCB_Type *const _CYHAL_SCB_BASE_ADDRESSES[_SCB_ARRAY_SIZE];
+
 	uint32_t i;
 
 	for (i = 0u; i < _SCB_ARRAY_SIZE; i++) {
 		if (_CYHAL_SCB_BASE_ADDRESSES[i] == reg_addr) {
-			return i;
+			return _CYHAL_SCB_BASE_ADDRESS_INDEX[i];
 		}
 	}
 
@@ -482,7 +485,7 @@ static int ifx_cat1_uart_init(const struct device *dev)
 	return ret;
 }
 
-static const struct uart_driver_api ifx_cat1_uart_driver_api = {
+static DEVICE_API(uart, ifx_cat1_uart_driver_api) = {
 	.poll_in = ifx_cat1_uart_poll_in,
 	.poll_out = ifx_cat1_uart_poll_out,
 	.err_check = ifx_cat1_uart_err_check,
@@ -516,9 +519,9 @@ static const struct uart_driver_api ifx_cat1_uart_driver_api = {
 											     \
 	static struct ifx_cat1_uart_config ifx_cat1_uart##n##_cfg = {			     \
 		.dt_cfg.baudrate = DT_INST_PROP(n, current_speed),			     \
-		.dt_cfg.parity = DT_INST_ENUM_IDX_OR(n, parity, UART_CFG_PARITY_NONE),	     \
-		.dt_cfg.stop_bits = DT_INST_ENUM_IDX_OR(n, stop_bits, UART_CFG_STOP_BITS_1), \
-		.dt_cfg.data_bits = DT_INST_ENUM_IDX_OR(n, data_bits, UART_CFG_DATA_BITS_8), \
+		.dt_cfg.parity = DT_INST_ENUM_IDX(n, parity),				     \
+		.dt_cfg.stop_bits = DT_INST_ENUM_IDX(n, stop_bits),			     \
+		.dt_cfg.data_bits = DT_INST_ENUM_IDX(n, data_bits),			     \
 		.dt_cfg.flow_ctrl = DT_INST_PROP(n, hw_flow_control),			     \
 		.pcfg = PINCTRL_DT_INST_DEV_CONFIG_GET(n),				     \
 		.reg_addr = (CySCB_Type *)DT_INST_REG_ADDR(n),				     \
@@ -526,7 +529,7 @@ static const struct uart_driver_api ifx_cat1_uart_driver_api = {
 	};										     \
 											     \
 	DEVICE_DT_INST_DEFINE(n,							     \
-			      &ifx_cat1_uart_init, NULL,				     \
+			      ifx_cat1_uart_init, NULL,					     \
 			      &ifx_cat1_uart##n##_data,					     \
 			      &ifx_cat1_uart##n##_cfg, PRE_KERNEL_1,			     \
 			      CONFIG_SERIAL_INIT_PRIORITY,				     \

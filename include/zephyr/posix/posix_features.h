@@ -123,7 +123,10 @@
 #endif
 
 /* #define _POSIX_SPORADIC_SERVER (-1L) */
-/* #define _POSIX_SYNCHRONIZED_IO (-1L) */
+
+#ifdef CONFIG_POSIX_SYNCHRONIZED_IO
+#define _POSIX_SYNCHRONIZED_IO _POSIX_VERSION
+#endif
 
 #ifdef CONFIG_POSIX_THREAD_ATTR_STACKADDR
 #define _POSIX_THREAD_ATTR_STACKADDR _POSIX_VERSION
@@ -198,9 +201,9 @@
 /*
  * POSIX2 Options
  */
-#define _POSIX2_VERSION _POSIX_VERSION
-#define _POSIX2_C_BIND  _POSIX2_VERSION
-#define _POSIX2_C_DEV   _POSIX2_VERSION
+/* #define _POSIX2_VERSION (-1) */
+#define _POSIX2_C_BIND _POSIX_VERSION
+/* #define _POSIX2_C_DEV (-1) */
 /* #define _POSIX2_CHAR_TERM (-1L) */
 /* #define _POSIX2_FORT_DEV (-1L) */
 /* #define _POSIX2_FORT_RUN (-1L) */
@@ -328,7 +331,9 @@
 #define SYMLOOP_MAX         _POSIX_SYMLOOP_MAX
 #define TIMER_MAX           _POSIX_TIMER_MAX
 #define TTY_NAME_MAX        _POSIX_TTY_NAME_MAX
+#ifndef TZNAME_MAX
 #define TZNAME_MAX          _POSIX_TZNAME_MAX
+#endif
 
 /* Pathname variable values */
 #define FILESIZEBITS             (32)

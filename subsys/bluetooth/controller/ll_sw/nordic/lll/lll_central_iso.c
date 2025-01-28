@@ -306,7 +306,7 @@ static int prepare_cb(struct lll_prepare_param *p)
 
 	radio_isr_set(isr_tx, cis_lll);
 
-	radio_tmr_tifs_set(EVENT_IFS_US);
+	radio_tmr_tifs_set(cis_lll->tifs_us);
 
 #if defined(CONFIG_BT_CTLR_PHY)
 	radio_switch_complete_and_rx(cis_lll->rx.phy);
@@ -501,7 +501,7 @@ static void isr_tx(void *param)
 	LL_ASSERT(!radio_is_ready());
 
 	/* +/- 2us active clock jitter, +1 us PPI to timer start compensation */
-	hcto = radio_tmr_tifs_base_get() + EVENT_IFS_US +
+	hcto = radio_tmr_tifs_base_get() + cis_lll->tifs_us +
 	       (EVENT_CLOCK_JITTER_US << 1) + RANGE_DELAY_US +
 	       HAL_RADIO_TMR_START_DELAY_US;
 
@@ -527,13 +527,13 @@ static void isr_tx(void *param)
 	radio_gpio_lna_setup();
 
 #if defined(CONFIG_BT_CTLR_PHY)
-	radio_gpio_pa_lna_enable(radio_tmr_tifs_base_get() + EVENT_IFS_US -
+	radio_gpio_pa_lna_enable(radio_tmr_tifs_base_get() + cis_lll->tifs_us -
 				 (EVENT_CLOCK_JITTER_US << 1) -
 				 radio_tx_chain_delay_get(cis_lll->tx.phy,
 							  cis_lll->tx.phy_flags) -
 				 HAL_RADIO_GPIO_LNA_OFFSET);
 #else /* !CONFIG_BT_CTLR_PHY */
-	radio_gpio_pa_lna_enable(radio_tmr_tifs_base_get() + EVENT_IFS_US -
+	radio_gpio_pa_lna_enable(radio_tmr_tifs_base_get() + cis_lll->tifs_us -
 				 (EVENT_CLOCK_JITTER_US << 1) -
 				 radio_tx_chain_delay_get(0U, 0U) -
 				 HAL_RADIO_GPIO_LNA_OFFSET);
@@ -546,6 +546,8 @@ static void isr_tx(void *param)
 	if (se_curr < cis_lll->nse) {
 		const struct lll_conn *evt_conn_lll;
 		uint16_t data_chan_id;
+
+#if !defined(CONFIG_BT_CTLR_SW_SWITCH_SINGLE_TIMER)
 		uint32_t subevent_us;
 		uint32_t start_us;
 
@@ -555,6 +557,7 @@ static void isr_tx(void *param)
 
 		start_us = radio_tmr_start_us(1U, subevent_us);
 		LL_ASSERT(start_us == (subevent_us + 1U));
+#endif /* !CONFIG_BT_CTLR_SW_SWITCH_SINGLE_TIMER */
 
 		/* Get reference to ACL context */
 		evt_conn_lll = ull_conn_lll_get(cis_lll->acl_handle);
@@ -574,9 +577,7 @@ static void isr_tx(void *param)
 		uint64_t payload_count;
 		uint16_t event_counter;
 		uint16_t data_chan_id;
-		uint32_t subevent_us;
 		uint16_t cis_handle;
-		uint32_t start_us;
 		memq_link_t *link;
 
 		/* Calculate channel for next CIS */
@@ -590,11 +591,22 @@ static void isr_tx(void *param)
 			return;
 		}
 
-		/* Get reference to ACL context */
-		next_conn_lll = ull_conn_lll_get(next_cis_lll->acl_handle);
+#if !defined(CONFIG_BT_CTLR_SW_SWITCH_SINGLE_TIMER)
+		uint32_t subevent_us;
+		uint32_t start_us;
+
+		subevent_us = radio_tmr_ready_restore();
+		subevent_us += next_cis_lll->offset - cis_offset_first;
+
+		start_us = radio_tmr_start_us(1U, subevent_us);
+		LL_ASSERT(start_us == (subevent_us + 1U));
+#endif /* !CONFIG_BT_CTLR_SW_SWITCH_SINGLE_TIMER */
 
 		/* Event counter value,  0-15 bit of cisEventCounter */
 		event_counter = next_cis_lll->event_count;
+
+		/* Get reference to ACL context */
+		next_conn_lll = ull_conn_lll_get(next_cis_lll->acl_handle);
 
 		/* Calculate the radio channel to use for ISO event */
 		data_chan_id = lll_chan_id(next_cis_lll->access_addr);
@@ -603,12 +615,6 @@ static void isr_tx(void *param)
 						   next_conn_lll->data_chan_count,
 						   &next_cis_chan_prn_s,
 						   &next_cis_chan_remap_idx);
-
-		subevent_us = radio_tmr_ready_restore();
-		subevent_us += next_cis_lll->offset - cis_offset_first;
-
-		start_us = radio_tmr_start_us(1U, subevent_us);
-		LL_ASSERT(start_us == (subevent_us + 1U));
 
 		cis_lll = next_cis_lll;
 
@@ -775,7 +781,7 @@ static void isr_rx(void *param)
 						(cis_lll->rx.payload_count / cis_lll->rx.bn)) *
 					       cig_lll->iso_interval_us;
 			iso_meta->timestamp %=
-				HAL_TICKER_TICKS_TO_US(BIT(HAL_TICKER_CNTR_MSBIT + 1U));
+				HAL_TICKER_TICKS_TO_US_64BIT(BIT64(HAL_TICKER_CNTR_MSBIT + 1U));
 			iso_meta->status = 0U;
 
 			ull_iso_pdu_rx_alloc();
@@ -838,9 +844,18 @@ isr_rx_next_subevent:
 			uint64_t payload_count;
 			uint16_t event_counter;
 			uint16_t data_chan_id;
+			memq_link_t *link;
+
+#if !defined(CONFIG_BT_CTLR_SW_SWITCH_SINGLE_TIMER)
 			uint32_t subevent_us;
 			uint32_t start_us;
-			memq_link_t *link;
+
+			subevent_us = radio_tmr_ready_restore();
+			subevent_us += next_cis_lll->offset - cis_offset_first;
+
+			start_us = radio_tmr_start_us(1U, subevent_us);
+			LL_ASSERT(start_us == (subevent_us + 1U));
+#endif /* !CONFIG_BT_CTLR_SW_SWITCH_SINGLE_TIMER */
 
 			/* Event counter value,  0-15 bit of cisEventCounter */
 			event_counter = next_cis_lll->event_count;
@@ -852,12 +867,6 @@ isr_rx_next_subevent:
 							   next_conn_lll->data_chan_count,
 							   &next_cis_chan_prn_s,
 							   &next_cis_chan_remap_idx);
-
-			subevent_us = radio_tmr_ready_restore();
-			subevent_us += next_cis_lll->offset - cis_offset_first;
-
-			start_us = radio_tmr_start_us(1U, subevent_us);
-			LL_ASSERT(start_us == (subevent_us + 1U));
 
 			old_cis_lll = cis_lll;
 			cis_lll = next_cis_lll;
@@ -935,7 +944,6 @@ static void isr_prepare_subevent(void *param)
 	struct pdu_cis *pdu_tx;
 	uint64_t payload_count;
 	uint8_t payload_index;
-	uint32_t subevent_us;
 	uint32_t start_us;
 
 	/* Get reference to CIS LLL context */
@@ -1044,7 +1052,7 @@ static void isr_prepare_subevent(void *param)
 	radio_tmr_rx_disable();
 	radio_tmr_tx_enable();
 
-	radio_tmr_tifs_set(EVENT_IFS_US);
+	radio_tmr_tifs_set(cis_lll->tifs_us);
 
 #if defined(CONFIG_BT_CTLR_PHY)
 	radio_switch_complete_and_rx(cis_lll->rx.phy);
@@ -1052,12 +1060,26 @@ static void isr_prepare_subevent(void *param)
 	radio_switch_complete_and_rx(0U);
 #endif /* !CONFIG_BT_CTLR_PHY */
 
+#if defined(HAL_RADIO_GPIO_HAVE_PA_PIN) || \
+	defined(CONFIG_BT_CTLR_SW_SWITCH_SINGLE_TIMER)
+	uint32_t subevent_us;
+
 	subevent_us = radio_tmr_ready_restore();
 	subevent_us += cis_lll->offset - cis_offset_first +
 		       (cis_lll->sub_interval * se_curr);
 
+#if defined(CONFIG_BT_CTLR_SW_SWITCH_SINGLE_TIMER)
+	start_us = radio_tmr_start_us(1U, subevent_us);
+	LL_ASSERT(start_us == (subevent_us + 1U));
+
+#else /* !CONFIG_BT_CTLR_SW_SWITCH_SINGLE_TIMER */
 	/* Compensate for the 1 us added by radio_tmr_start_us() */
 	start_us = subevent_us + 1U;
+#endif /* !CONFIG_BT_CTLR_SW_SWITCH_SINGLE_TIMER */
+
+#endif /* HAL_RADIO_GPIO_HAVE_PA_PIN ||
+	* CONFIG_BT_CTLR_SW_SWITCH_SINGLE_TIMER
+	*/
 
 	/* capture end of Tx-ed PDU, used to calculate HCTO. */
 	radio_tmr_end_capture();
@@ -1253,8 +1275,10 @@ static void payload_count_lazy_update(struct lll_conn_iso_stream *cis_lll, uint1
 			u = cis_lll->nse - ((cis_lll->nse / cis_lll->tx.bn) *
 					    (cis_lll->tx.bn - 1U -
 					     (payload_count % cis_lll->tx.bn)));
-			while (((cis_lll->tx.payload_count / cis_lll->tx.bn) + cis_lll->tx.ft) <
-			       (cis_lll->event_count + 1U)) {
+			while ((((cis_lll->tx.payload_count / cis_lll->tx.bn) + cis_lll->tx.ft) <
+				cis_lll->event_count) ||
+			       ((((cis_lll->tx.payload_count / cis_lll->tx.bn) + cis_lll->tx.ft) ==
+				 cis_lll->event_count) && (u <= cis_lll->nse))) {
 				/* sn and nesn are 1-bit, only Least Significant bit is needed */
 				cis_lll->sn++;
 				cis_lll->tx.bn_curr++;
@@ -1281,8 +1305,10 @@ static void payload_count_lazy_update(struct lll_conn_iso_stream *cis_lll, uint1
 			u = cis_lll->nse - ((cis_lll->nse / cis_lll->rx.bn) *
 					    (cis_lll->rx.bn - 1U -
 					     (payload_count % cis_lll->rx.bn)));
-			while (((cis_lll->rx.payload_count / cis_lll->rx.bn) + cis_lll->rx.ft) <
-			       (cis_lll->event_count + 1U)) {
+			while ((((cis_lll->rx.payload_count / cis_lll->rx.bn) + cis_lll->rx.ft) <
+				cis_lll->event_count) ||
+			       ((((cis_lll->rx.payload_count / cis_lll->rx.bn) + cis_lll->rx.ft) ==
+				 cis_lll->event_count) && (u <= cis_lll->nse))) {
 				/* sn and nesn are 1-bit, only Least Significant bit is needed */
 				cis_lll->nesn++;
 				cis_lll->rx.bn_curr++;

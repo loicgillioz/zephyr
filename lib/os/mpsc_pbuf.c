@@ -201,7 +201,7 @@ static bool drop_item_locked(struct mpsc_pbuf_buffer *buffer,
 
 	uint32_t rd_wlen = buffer->get_wlen(item);
 
-	/* If packet is busy need to be ommited. */
+	/* If packet is busy need to be omitted. */
 	if (!is_valid(item)) {
 		return false;
 	} else if (item->hdr.busy) {
@@ -215,7 +215,7 @@ static bool drop_item_locked(struct mpsc_pbuf_buffer *buffer,
 		buffer->wr_idx = idx_inc(buffer, buffer->wr_idx, rd_wlen);
 
 		/* If allocation wrapped around the buffer and found busy packet
-		 * that was already ommited, skip it again.
+		 * that was already omitted, skip it again.
 		 */
 		if (buffer->rd_idx == buffer->tmp_rd_idx) {
 			buffer->tmp_rd_idx = idx_inc(buffer, buffer->tmp_rd_idx, rd_wlen);
@@ -373,7 +373,7 @@ union mpsc_pbuf_generic *mpsc_pbuf_alloc(struct mpsc_pbuf_buffer *buffer,
 			add_skip_item(buffer, free_wlen);
 			cont = true;
 		} else if (IS_ENABLED(CONFIG_MULTITHREADING) && !K_TIMEOUT_EQ(timeout, K_NO_WAIT) &&
-			   !k_is_in_isr()) {
+			   !k_is_in_isr() && arch_irq_unlocked(key.key)) {
 			int err;
 
 			k_spin_unlock(&buffer->lock, key);
@@ -611,8 +611,10 @@ void mpsc_pbuf_free(struct mpsc_pbuf_buffer *buffer,
 bool mpsc_pbuf_is_pending(struct mpsc_pbuf_buffer *buffer)
 {
 	uint32_t a;
+	k_spinlock_key_t key = k_spin_lock(&buffer->lock);
 
 	(void)available(buffer, &a);
+	k_spin_unlock(&buffer->lock, key);
 
 	return a ? true : false;
 }

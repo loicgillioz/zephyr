@@ -135,11 +135,6 @@ static void *lb_get_desc(struct usbd_class_data *const c_data,
 
 static int lb_init(struct usbd_class_data *c_data)
 {
-	struct lb_data *data = usbd_class_get_private(c_data);
-	struct loopback_desc *desc = data->desc;
-
-	desc->iad.bFirstInterface = desc->if0.bInterfaceNumber;
-
 	LOG_DBG("Init class instance %p", c_data);
 
 	return 0;
@@ -270,7 +265,7 @@ static struct loopback_desc lb_desc_##x = {					\
 		.bDescriptorType = USB_DESC_ENDPOINT,				\
 		.bEndpointAddress = 0x83,					\
 		.bmAttributes = USB_EP_TYPE_ISO,				\
-		.wMaxPacketSize = 0,						\
+		.wMaxPacketSize = sys_cpu_to_le16(0),				\
 		.bInterval = LB_ISO_EP_INTERVAL,				\
 	},									\
 										\
@@ -279,7 +274,7 @@ static struct loopback_desc lb_desc_##x = {					\
 		.bDescriptorType = USB_DESC_ENDPOINT,				\
 		.bEndpointAddress = 0x03,					\
 		.bmAttributes = USB_EP_TYPE_ISO,				\
-		.wMaxPacketSize = 0,						\
+		.wMaxPacketSize = sys_cpu_to_le16(0),				\
 		.bInterval = LB_ISO_EP_INTERVAL,				\
 	},									\
 										\

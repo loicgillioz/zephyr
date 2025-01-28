@@ -25,6 +25,7 @@ LOG_MODULE_REGISTER(net_tcp, CONFIG_NET_TCP_LOG_LEVEL);
 #include "net_stats.h"
 #include "net_private.h"
 #include "tcp_internal.h"
+#include "pmtu.h"
 
 #define ACK_TIMEOUT_MS tcp_max_timeout_ms
 #define ACK_TIMEOUT K_MSEC(ACK_TIMEOUT_MS)
@@ -261,7 +262,7 @@ int net_tcp_endpoint_copy(struct net_context *ctx,
 				       sizeof(struct in_addr));
 				net_sin(local)->sin_port = net_sin_ptr(&ctx->local)->sin_port;
 				net_sin(local)->sin_family = AF_INET;
-			} else if (IS_ENABLED(CONFIG_NET_IPV4) && ctx->local.family == AF_INET6) {
+			} else if (IS_ENABLED(CONFIG_NET_IPV6) && ctx->local.family == AF_INET6) {
 				memcpy(&net_sin6(local)->sin6_addr,
 				       net_sin6_ptr(&ctx->local)->sin6_addr,
 				       sizeof(struct in6_addr));
@@ -836,17 +837,6 @@ static int tcp_conn_unref(struct tcp *conn)
 
 	NET_DBG("conn: %p, ref_count=%d", conn, ref_count);
 
-	k_mutex_lock(&conn->lock, K_FOREVER);
-
-#if !defined(CONFIG_NET_TEST_PROTOCOL)
-	if (conn->in_connect) {
-		conn->in_connect = false;
-		k_sem_reset(&conn->connect_sem);
-	}
-#endif /* CONFIG_NET_TEST_PROTOCOL */
-
-	k_mutex_unlock(&conn->lock);
-
 	ref_count = atomic_dec(&conn->ref_count) - 1;
 	if (ref_count != 0) {
 		tp_out(net_context_get_family(conn->context), conn->iface,
@@ -888,6 +878,9 @@ static int tcp_conn_close(struct tcp *conn, int status)
 			/* Make sure the connect_cb is only called once. */
 			conn->connect_cb = NULL;
 		}
+
+		conn->in_connect = false;
+		k_sem_reset(&conn->connect_sem);
 	} else if (conn->context->recv_cb) {
 		conn->context->recv_cb(conn->context, NULL, NULL, NULL,
 				       status, conn->recv_user_data);
@@ -1177,6 +1170,17 @@ static bool tcp_short_window(struct tcp *conn)
 	return true;
 }
 
+static bool tcp_need_window_update(struct tcp *conn)
+{
+	int32_t threshold = MAX(conn_mss(conn), conn->recv_win_max / 2);
+
+	/* In case window is full again, and we didn't send a window update
+	 * since the window size dropped below threshold, do it now.
+	 */
+	return (conn->recv_win == conn->recv_win_max &&
+		conn->recv_win_sent <= threshold);
+}
+
 /**
  * @brief Update TCP receive window
  *
@@ -1205,7 +1209,8 @@ static int tcp_update_recv_wnd(struct tcp *conn, int32_t delta)
 
 	short_win_after = tcp_short_window(conn);
 
-	if (short_win_before && !short_win_after &&
+	if (((short_win_before && !short_win_after) ||
+	     tcp_need_window_update(conn)) &&
 	    conn->state == TCP_ESTABLISHED) {
 		k_work_cancel_delayable(&conn->ack_timer);
 		tcp_out(conn, ACK);
@@ -1297,6 +1302,11 @@ static enum net_verdict tcp_data_get(struct tcp *conn, struct net_pkt *pkt, size
 		net_pkt_skip(pkt, net_pkt_get_len(pkt) - *len);
 
 		tcp_update_recv_wnd(conn, -*len);
+		if (*len > conn->recv_win_sent) {
+			conn->recv_win_sent = 0;
+		} else {
+			conn->recv_win_sent -= *len;
+		}
 
 		/* Do not pass data to application with TCP conn
 		 * locked as there could be an issue when the app tries
@@ -1582,6 +1592,10 @@ static int tcp_out_ext(struct tcp *conn, uint8_t flags, struct net_pkt *data,
 	}
 
 	sys_slist_append(&conn->send_queue, &pkt->next);
+
+	if (flags & ACK) {
+		conn->recv_win_sent = conn->recv_win;
+	}
 
 	if (is_destination_local(pkt)) {
 		/* If the destination is local, we have to let the current
@@ -2112,6 +2126,7 @@ static struct tcp *tcp_conn_alloc(void)
 	conn->state = TCP_LISTEN;
 	conn->recv_win_max = tcp_rx_window;
 	conn->recv_win = conn->recv_win_max;
+	conn->recv_win_sent = conn->recv_win_max;
 	conn->send_win_max = MAX(tcp_tx_window, NET_IPV6_MTU);
 	conn->send_win = conn->send_win_max;
 	conn->tcp_nodelay = false;
@@ -3623,8 +3638,8 @@ int net_tcp_put(struct net_context *context)
 		({ const char *state = net_context_state(context);
 					state ? state : "<unknown>"; }));
 
-	if (conn && (conn->state == TCP_ESTABLISHED ||
-		     conn->state == TCP_SYN_RECEIVED)) {
+	if (conn->state == TCP_ESTABLISHED ||
+	    conn->state == TCP_SYN_RECEIVED) {
 		/* Send all remaining data if possible. */
 		if (conn->send_data_total > 0) {
 			NET_DBG("conn %p pending %zu bytes", conn,
@@ -3656,8 +3671,9 @@ int net_tcp_put(struct net_context *context)
 
 			keep_alive_timer_stop(conn);
 		}
-	} else if (conn && conn->in_connect) {
+	} else if (conn->in_connect) {
 		conn->in_connect = false;
+		k_sem_reset(&conn->connect_sem);
 	}
 
 	k_mutex_unlock(&conn->lock);
@@ -3926,16 +3942,21 @@ int net_tcp_connect(struct net_context *context,
 	 * a TCP connection to be established
 	 */
 	conn->in_connect = !IS_ENABLED(CONFIG_NET_TEST_PROTOCOL);
+
+	/* The ref will make sure that if the connection is closed in tcp_in(),
+	 * we do not access already freed connection.
+	 */
+	tcp_conn_ref(conn);
 	(void)tcp_in(conn, NULL);
 
 	if (!IS_ENABLED(CONFIG_NET_TEST_PROTOCOL)) {
 		if (conn->state == TCP_UNUSED || conn->state == TCP_CLOSED) {
-			ret = -errno;
-			goto out;
+			ret = -ENOTCONN;
+			goto out_unref;
 		} else if ((K_TIMEOUT_EQ(timeout, K_NO_WAIT)) &&
 			   conn->state != TCP_ESTABLISHED) {
 			ret = -EINPROGRESS;
-			goto out;
+			goto out_unref;
 		} else if (k_sem_take(&conn->connect_sem, timeout) != 0 &&
 			   conn->state != TCP_ESTABLISHED) {
 			if (conn->in_connect) {
@@ -3944,11 +3965,15 @@ int net_tcp_connect(struct net_context *context,
 			}
 
 			ret = -ETIMEDOUT;
-			goto out;
+			goto out_unref;
 		}
 		conn->in_connect = false;
 	}
- out:
+
+out_unref:
+	tcp_conn_unref(conn);
+
+out:
 	NET_DBG("conn: %p, ret=%d", conn, ret);
 
 	return ret;
@@ -4368,53 +4393,135 @@ void net_tcp_foreach(net_tcp_cb_t cb, void *user_data)
 	k_mutex_unlock(&tcp_lock);
 }
 
+static uint16_t get_ipv6_destination_mtu(struct net_if *iface,
+					 const struct in6_addr *dest)
+{
+#if defined(CONFIG_NET_IPV6_PMTU)
+	int mtu = net_pmtu_get_mtu((struct sockaddr *)&(struct sockaddr_in6){
+			.sin6_family = AF_INET6,
+			.sin6_addr = *dest });
+
+	if (mtu < 0) {
+		if (iface != NULL) {
+			return net_if_get_mtu(iface);
+		}
+
+		return NET_IPV6_MTU;
+	}
+
+	return (uint16_t)mtu;
+#else
+	if (iface != NULL) {
+		return net_if_get_mtu(iface);
+	}
+
+	return NET_IPV6_MTU;
+#endif /* CONFIG_NET_IPV6_PMTU */
+}
+
+static uint16_t get_ipv4_destination_mtu(struct net_if *iface,
+					 const struct in_addr *dest)
+{
+#if defined(CONFIG_NET_IPV4_PMTU)
+	int mtu = net_pmtu_get_mtu((struct sockaddr *)&(struct sockaddr_in){
+			.sin_family = AF_INET,
+			.sin_addr = *dest });
+
+	if (mtu < 0) {
+		if (iface != NULL) {
+			return net_if_get_mtu(iface);
+		}
+
+		return NET_IPV4_MTU;
+	}
+
+	return (uint16_t)mtu;
+#else
+	if (iface != NULL) {
+		return net_if_get_mtu(iface);
+	}
+
+	return NET_IPV4_MTU;
+#endif /* CONFIG_NET_IPV4_PMTU */
+}
+
 uint16_t net_tcp_get_supported_mss(const struct tcp *conn)
 {
 	sa_family_t family = net_context_get_family(conn->context);
 
-	if (family == AF_INET) {
-#if defined(CONFIG_NET_IPV4)
+	if (IS_ENABLED(CONFIG_NET_IPV4) && family == AF_INET) {
 		struct net_if *iface = net_context_get_iface(conn->context);
-		int mss = 0;
+		uint16_t dest_mtu;
 
-		if (iface && net_if_get_mtu(iface) >= NET_IPV4TCPH_LEN) {
-			/* Detect MSS based on interface MTU minus "TCP,IP
-			 * header size"
-			 */
-			mss = net_if_get_mtu(iface) - NET_IPV4TCPH_LEN;
-		}
+		dest_mtu = get_ipv4_destination_mtu(iface, &conn->dst.sin.sin_addr);
 
-		if (mss == 0) {
-			mss = NET_IPV4_MTU - NET_IPV4TCPH_LEN;
-		}
+		/* Detect MSS based on interface MTU minus "TCP,IP header size" */
+		return dest_mtu - NET_IPV4TCPH_LEN;
 
-		return mss;
-#else
-		return 0;
-#endif /* CONFIG_NET_IPV4 */
-	}
-#if defined(CONFIG_NET_IPV6)
-	else if (family == AF_INET6) {
+	} else if (IS_ENABLED(CONFIG_NET_IPV6) && family == AF_INET6) {
 		struct net_if *iface = net_context_get_iface(conn->context);
-		int mss = 0;
+		uint16_t dest_mtu;
 
-		if (iface && net_if_get_mtu(iface) >= NET_IPV6TCPH_LEN) {
-			/* Detect MSS based on interface MTU minus "TCP,IP
-			 * header size"
-			 */
-			mss = net_if_get_mtu(iface) - NET_IPV6TCPH_LEN;
-		}
+		dest_mtu = get_ipv6_destination_mtu(iface, &conn->dst.sin6.sin6_addr);
 
-		if (mss == 0) {
-			mss = NET_IPV6_MTU - NET_IPV6TCPH_LEN;
-		}
-
-		return mss;
+		/* Detect MSS based on interface MTU minus "TCP,IP header size" */
+		return dest_mtu - NET_IPV6TCPH_LEN;
 	}
-#endif /* CONFIG_NET_IPV6 */
 
 	return 0;
 }
+
+#if defined(CONFIG_NET_TEST)
+struct testing_user_data {
+	struct sockaddr remote;
+	uint16_t mtu;
+};
+
+static void testing_find_conn(struct tcp *conn, void *user_data)
+{
+	struct testing_user_data *data = user_data;
+
+	if (IS_ENABLED(CONFIG_NET_IPV6) && data->remote.sa_family == AF_INET6 &&
+	    net_ipv6_addr_cmp(&conn->dst.sin6.sin6_addr,
+			      &net_sin6(&data->remote)->sin6_addr)) {
+		if (data->mtu > 0) {
+			/* Set it only once */
+			return;
+		}
+
+		NET_DBG("Found connection %p mtu %u", conn,
+			net_tcp_get_supported_mss(conn) + NET_IPV6TCPH_LEN);
+		data->mtu = net_tcp_get_supported_mss(conn) + NET_IPV6TCPH_LEN;
+		return;
+	}
+
+	if (IS_ENABLED(CONFIG_NET_IPV4) && data->remote.sa_family == AF_INET &&
+	    net_ipv4_addr_cmp(&conn->dst.sin.sin_addr,
+			      &net_sin(&data->remote)->sin_addr)) {
+		if (data->mtu > 0) {
+			/* Set it only once */
+			return;
+		}
+
+		NET_DBG("Found connection %p mtu %u", conn,
+			net_tcp_get_supported_mss(conn) + NET_IPV4TCPH_LEN);
+		data->mtu = net_tcp_get_supported_mss(conn) + NET_IPV4TCPH_LEN;
+		return;
+	}
+}
+
+uint16_t net_tcp_get_mtu(struct sockaddr *dst)
+{
+	struct testing_user_data data = {
+		.remote = *dst,
+		.mtu = 0,
+	};
+
+	net_tcp_foreach(testing_find_conn, &data);
+
+	return data.mtu;
+}
+#endif /* CONFIG_NET_TEST */
 
 int net_tcp_set_option(struct net_context *context,
 		       enum tcp_conn_option option,

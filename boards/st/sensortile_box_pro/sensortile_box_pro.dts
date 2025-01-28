@@ -14,9 +14,6 @@
 	compatible = "st,sensortile-box-pro";
 
 	chosen {
-		zephyr,console = &cdc_acm_uart0;
-		zephyr,shell-uart = &cdc_acm_uart0;
-		zephyr,bt-c2h-uart = &cdc_acm_uart0;
 		zephyr,sram = &sram0;
 		zephyr,flash = &flash0;
 		zephyr,code-partition = &slot0_partition;
@@ -228,13 +225,6 @@ stm32_lp_tick_source: &lptim1 {
 	status = "okay";
 	clock-frequency = <I2C_BITRATE_FAST>;
 
-	hts221@5f {
-		compatible = "st,hts221";
-		reg = <0x5f>;
-		drdy-gpios = <&gpioe 11 GPIO_ACTIVE_HIGH>;
-		status = "okay";
-	};
-
 	lps22df@5d {
 		compatible = "st,lps22df";
 		reg = <0x5d>;
@@ -276,16 +266,14 @@ zephyr_udc0: &usbotg_fs {
 	pinctrl-0 = <&usb_otg_fs_dm_pa11 &usb_otg_fs_dp_pa12>;
 	pinctrl-names = "default";
 	status = "okay";
-
-	cdc_acm_uart0: cdc_acm_uart0 {
-		compatible = "zephyr,cdc-acm-uart";
-	};
 };
+
+#include <../boards/common/usb/cdc_acm_serial.dtsi>
 
 &adc1 {
 	pinctrl-0 = <&adc1_in15_pb0>;
 	pinctrl-names = "default";
-	st,adc-clock-source = <ASYNC>;
+	st,adc-clock-source = "ASYNC";
 	st,adc-prescaler = <4>;
 	status = "okay";
 };
@@ -293,7 +281,7 @@ zephyr_udc0: &usbotg_fs {
 &adc4 {
 	pinctrl-0 = <&adc4_in19_pb1>;
 	pinctrl-names = "default";
-	st,adc-clock-source = <ASYNC>;
+	st,adc-clock-source = "ASYNC";
 	st,adc-prescaler = <4>;
 	status = "okay";
 };

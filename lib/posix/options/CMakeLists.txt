@@ -71,6 +71,10 @@ if (NOT CONFIG_TC_PROVIDES_POSIX_FILE_SYSTEM)
   zephyr_library_sources_ifdef(CONFIG_POSIX_FILE_SYSTEM fs.c)
 endif()
 
+if (NOT CONFIG_TC_PROVIDES_POSIX_FILE_SYSTEM_R)
+  zephyr_library_sources_ifdef(CONFIG_POSIX_FILE_SYSTEM_R file_system_r.c)
+endif()
+
 zephyr_library_sources_ifdef(CONFIG_POSIX_FSYNC fsync.c)
 zephyr_library_sources_ifdef(CONFIG_POSIX_MEMLOCK mlockall.c)
 zephyr_library_sources_ifdef(CONFIG_POSIX_MEMLOCK_RANGE mlock.c)
@@ -142,9 +146,11 @@ if (NOT CONFIG_TC_PROVIDES_POSIX_THREADS)
   # We have opted to use POSIX_THREADS here to match the Option name.
   zephyr_library_sources_ifdef(CONFIG_POSIX_THREADS
     cond.c
+    grp.c
     key.c
     mutex.c
     pthread.c
+    pwd.c
   )
 endif()
 
@@ -167,3 +173,5 @@ zephyr_library_include_directories(
 )
 
 zephyr_library_property(ALLOW_EMPTY TRUE)
+
+zephyr_library_compile_options(-U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)

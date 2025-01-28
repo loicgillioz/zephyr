@@ -31,6 +31,7 @@
 	"WARNING: A print request was detected on not active shell backend.\n"
 #define SHELL_MSG_TOO_MANY_ARGS		"Too many arguments in the command.\n"
 #define SHELL_INIT_OPTION_PRINTER	(NULL)
+#define SHELL_TX_MTX_TIMEOUT_MS		50
 
 #define SHELL_THREAD_PRIORITY \
 	COND_CODE_1(CONFIG_SHELL_THREAD_PRIORITY_OVERRIDE, \
@@ -141,6 +142,7 @@ static void tab_item_print(const struct shell *sh, const char *option,
 
 	columns = (sh->ctx->vt100_ctx.cons.terminal_wid
 			- z_shell_strlen(tab)) / longest_option;
+	__ASSERT_NO_MSG(columns != 0);
 	diff = longest_option - z_shell_strlen(option);
 
 	if (sh->ctx->vt100_ctx.printed_cmd++ % columns == 0U) {
@@ -1349,7 +1351,9 @@ void shell_thread(void *shell_handle, void *arg_log_backend,
 			     K_FOREVER);
 
 		if (err != 0) {
-			k_mutex_lock(&sh->ctx->wr_mtx, K_FOREVER);
+			if (k_mutex_lock(&sh->ctx->wr_mtx, K_MSEC(SHELL_TX_MTX_TIMEOUT_MS)) != 0) {
+				return;
+			}
 			z_shell_fprintf(sh, SHELL_ERROR,
 					"Shell thread error: %d", err);
 			k_mutex_unlock(&sh->ctx->wr_mtx);
@@ -1440,16 +1444,27 @@ int shell_start(const struct shell *sh)
 		z_shell_log_backend_enable(sh->log_backend, (void *)sh, sh->ctx->log_level);
 	}
 
-	k_mutex_lock(&sh->ctx->wr_mtx, K_FOREVER);
+	if (k_mutex_lock(&sh->ctx->wr_mtx, K_MSEC(SHELL_TX_MTX_TIMEOUT_MS)) != 0) {
+		return -EBUSY;
+	}
 
 	if (IS_ENABLED(CONFIG_SHELL_VT100_COLORS)) {
 		z_shell_vt100_color_set(sh, SHELL_NORMAL);
 	}
 
-	if (z_shell_strlen(sh->default_prompt) > 0) {
-		z_shell_raw_fprintf(sh->fprintf_ctx, "\n\n");
-	}
+	/* print new line before printing the prompt to clear the line
+	 * vt100 are not used here for compatibility reasons
+	 */
+	z_cursor_next_line_move(sh);
 	state_set(sh, SHELL_STATE_ACTIVE);
+
+	/*
+	 * If the shell is stopped with the shell_stop function, its backend remains active
+	 * and continues to buffer incoming data. As a result, when the shell is resumed,
+	 * all buffered data is processed, which may lead to the execution of commands
+	 * received while the shell was stopped.
+	 */
+	z_shell_backend_rx_buffer_flush(sh);
 
 	k_mutex_unlock(&sh->ctx->wr_mtx);
 
@@ -1533,7 +1548,10 @@ void shell_vfprintf(const struct shell *sh, enum shell_vt100_color color,
 		return;
 	}
 
-	k_mutex_lock(&sh->ctx->wr_mtx, K_FOREVER);
+	if (k_mutex_lock(&sh->ctx->wr_mtx, K_MSEC(SHELL_TX_MTX_TIMEOUT_MS)) != 0) {
+		return;
+	}
+
 	if (!z_flag_cmd_ctx_get(sh) && !sh->ctx->bypass && z_flag_use_vt100_get(sh)) {
 		z_shell_cmd_line_erase(sh);
 	}
@@ -1542,11 +1560,17 @@ void shell_vfprintf(const struct shell *sh, enum shell_vt100_color color,
 		z_shell_print_prompt_and_cmd(sh);
 	}
 	z_transport_buffer_flush(sh);
+
 	k_mutex_unlock(&sh->ctx->wr_mtx);
 }
 
-/* This function mustn't be used from shell context to avoid deadlock.
- * However it can be used in shell command handlers.
+/* These functions mustn't be used from shell context to avoid deadlock:
+ * - shell_fprintf_impl
+ * - shell_fprintf_info
+ * - shell_fprintf_normal
+ * - shell_fprintf_warn
+ * - shell_fprintf_error
+ * However, they can be used in shell command handlers.
  */
 void shell_fprintf_impl(const struct shell *sh, enum shell_vt100_color color,
 		   const char *fmt, ...)
@@ -1558,6 +1582,42 @@ void shell_fprintf_impl(const struct shell *sh, enum shell_vt100_color color,
 	va_end(args);
 }
 
+void shell_fprintf_info(const struct shell *sh, const char *fmt, ...)
+{
+	va_list args;
+
+	va_start(args, fmt);
+	shell_vfprintf(sh, SHELL_INFO, fmt, args);
+	va_end(args);
+}
+
+void shell_fprintf_normal(const struct shell *sh, const char *fmt, ...)
+{
+	va_list args;
+
+	va_start(args, fmt);
+	shell_vfprintf(sh, SHELL_NORMAL, fmt, args);
+	va_end(args);
+}
+
+void shell_fprintf_warn(const struct shell *sh, const char *fmt, ...)
+{
+	va_list args;
+
+	va_start(args, fmt);
+	shell_vfprintf(sh, SHELL_WARNING, fmt, args);
+	va_end(args);
+}
+
+void shell_fprintf_error(const struct shell *sh, const char *fmt, ...)
+{
+	va_list args;
+
+	va_start(args, fmt);
+	shell_vfprintf(sh, SHELL_ERROR, fmt, args);
+	va_end(args);
+}
+
 void shell_hexdump_line(const struct shell *sh, unsigned int offset,
 			const uint8_t *data, size_t len)
 {
@@ -1565,35 +1625,35 @@ void shell_hexdump_line(const struct shell *sh, unsigned int offset,
 
 	int i;
 
-	shell_fprintf(sh, SHELL_NORMAL, "%08X: ", offset);
+	shell_fprintf_normal(sh, "%08X: ", offset);
 
 	for (i = 0; i < SHELL_HEXDUMP_BYTES_IN_LINE; i++) {
 		if (i > 0 && !(i % 8)) {
-			shell_fprintf(sh, SHELL_NORMAL, " ");
+			shell_fprintf_normal(sh, " ");
 		}
 
 		if (i < len) {
-			shell_fprintf(sh, SHELL_NORMAL, "%02x ",
-				      data[i] & 0xFF);
+			shell_fprintf_normal(sh, "%02x ",
+					     data[i] & 0xFF);
 		} else {
-			shell_fprintf(sh, SHELL_NORMAL, "   ");
+			shell_fprintf_normal(sh, "   ");
 		}
 	}
 
-	shell_fprintf(sh, SHELL_NORMAL, "|");
+	shell_fprintf_normal(sh, "|");
 
 	for (i = 0; i < SHELL_HEXDUMP_BYTES_IN_LINE; i++) {
 		if (i > 0 && !(i % 8)) {
-			shell_fprintf(sh, SHELL_NORMAL, " ");
+			shell_fprintf_normal(sh, " ");
 		}
 
 		if (i < len) {
 			char c = data[i];
 
-			shell_fprintf(sh, SHELL_NORMAL, "%c",
-				      isprint((int)c) != 0 ? c : '.');
+			shell_fprintf_normal(sh, "%c",
+					     isprint((int)c) != 0 ? c : '.');
 		} else {
-			shell_fprintf(sh, SHELL_NORMAL, " ");
+			shell_fprintf_normal(sh, " ");
 		}
 	}
 
@@ -1626,10 +1686,9 @@ int shell_prompt_change(const struct shell *sh, const char *prompt)
 		return -EINVAL;
 	}
 
-	static const size_t mtx_timeout_ms = 20;
 	size_t prompt_length = z_shell_strlen(prompt);
 
-	if (k_mutex_lock(&sh->ctx->wr_mtx, K_MSEC(mtx_timeout_ms))) {
+	if (k_mutex_lock(&sh->ctx->wr_mtx, K_MSEC(SHELL_TX_MTX_TIMEOUT_MS)) != 0) {
 		return -EBUSY;
 	}
 
@@ -1652,7 +1711,9 @@ int shell_prompt_change(const struct shell *sh, const char *prompt)
 
 void shell_help(const struct shell *sh)
 {
-	k_mutex_lock(&sh->ctx->wr_mtx, K_FOREVER);
+	if (k_mutex_lock(&sh->ctx->wr_mtx, K_MSEC(SHELL_TX_MTX_TIMEOUT_MS)) != 0) {
+		return;
+	}
 	shell_internal_help_print(sh);
 	k_mutex_unlock(&sh->ctx->wr_mtx);
 }
@@ -1685,7 +1746,9 @@ int shell_execute_cmd(const struct shell *sh, const char *cmd)
 	sh->ctx->cmd_buff_len = cmd_len;
 	sh->ctx->cmd_buff_pos = cmd_len;
 
-	k_mutex_lock(&sh->ctx->wr_mtx, K_FOREVER);
+	if (k_mutex_lock(&sh->ctx->wr_mtx, K_MSEC(SHELL_TX_MTX_TIMEOUT_MS)) != 0) {
+		return -ENOEXEC;
+	}
 	ret_val = execute(sh);
 	k_mutex_unlock(&sh->ctx->wr_mtx);
 

@@ -9,10 +9,9 @@ supported:
   - gpio
   - watchdog
   - uart
+  - dma
+  - pwm
   - spi
-testing:
-  ignore_tags:
-    - net
-    - bluetooth
-    - pm
-    - tracing
+  - counter
+  - entropy
+  - i2c

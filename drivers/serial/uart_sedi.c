@@ -63,11 +63,11 @@ static void uart_sedi_cb(struct device *port);
 	};							      \
 								      \
 	static struct uart_sedi_drv_data drv_data_##n;		      \
-	PM_DEVICE_DT_DEFINE(DT_NODELABEL(uart##n),                    \
+	PM_DEVICE_DT_INST_DEFINE(n,                                   \
 			    uart_sedi_pm_action);		      \
-	DEVICE_DT_DEFINE(DT_NODELABEL(uart##n),		              \
+	DEVICE_DT_INST_DEFINE(n,			              \
 		      &uart_sedi_init,				      \
-		      PM_DEVICE_DT_GET(DT_NODELABEL(uart##n)),        \
+		      PM_DEVICE_DT_INST_GET(n),			      \
 		      &drv_data_##n, &config_info_##n,		      \
 		      PRE_KERNEL_1,				      \
 		      CONFIG_SERIAL_INIT_PRIORITY, &api);	      \
@@ -513,7 +513,7 @@ static int uart_sedi_line_ctrl_get(struct device *dev,
 
 #endif /* CONFIG_UART_LINE_CTRL */
 
-static const struct uart_driver_api api = {
+static DEVICE_API(uart, api) = {
 	.poll_in = uart_sedi_poll_in,
 	.poll_out = uart_sedi_poll_out,
 	.err_check = uart_sedi_err_check,

@@ -7,6 +7,9 @@
 #include <zephyr/drivers/pinctrl.h>
 
 #include <hal/nrf_gpio.h>
+#ifdef CONFIG_SOC_NRF54H20_GPD
+#include <nrf/gpd.h>
+#endif
 
 BUILD_ASSERT(((NRF_PULL_NONE == NRF_GPIO_PIN_NOPULL) &&
 	      (NRF_PULL_DOWN == NRF_GPIO_PIN_PULLDOWN) &&
@@ -91,9 +94,18 @@ static const nrf_gpio_pin_drive_t drive_modes[NRF_DRIVE_COUNT] = {
 #define NRF_PSEL_QSPI(reg, line) ((NRF_QSPI_Type *)reg)->PSEL.line
 #endif
 
+#if DT_HAS_COMPAT_STATUS_OKAY(nordic_nrf_twis) || defined(CONFIG_NRFX_TWIS)
+#include <hal/nrf_twis.h>
+#define NRF_PSEL_TWIS(reg, line) ((NRF_TWIS_Type *)reg)->PSEL.line
+#endif
+
 int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt,
 			   uintptr_t reg)
 {
+#ifdef CONFIG_SOC_NRF54H20_GPD
+	bool gpd_requested = false;
+#endif
+
 	for (uint8_t i = 0U; i < pin_cnt; i++) {
 		nrf_gpio_pin_drive_t drive;
 		uint8_t drive_idx = NRF_GET_DRIVE(pins[i]);
@@ -101,9 +113,6 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt,
 		uint32_t write = NO_WRITE;
 		nrf_gpio_pin_dir_t dir;
 		nrf_gpio_pin_input_t input;
-#if NRF_GPIO_HAS_CLOCKPIN
-		bool clockpin = false;
-#endif
 
 		if (drive_idx < ARRAY_SIZE(drive_modes)) {
 			drive = drive_modes[drive_idx];
@@ -122,9 +131,6 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt,
 			write = 1U;
 			dir = NRF_GPIO_PIN_DIR_OUTPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
-#if NRF_GPIO_HAS_CLOCKPIN && defined(NRF_UARTE_CLOCKPIN_TXD_NEEDED)
-			clockpin = true;
-#endif
 			break;
 		case NRF_FUN_UART_RX:
 			NRF_PSEL_UART(reg, RXD) = psel;
@@ -136,9 +142,6 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt,
 			write = 1U;
 			dir = NRF_GPIO_PIN_DIR_OUTPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
-#if NRF_GPIO_HAS_CLOCKPIN && defined(NRF_UARTE_CLOCKPIN_RTS_NEEDED)
-			clockpin = true;
-#endif
 			break;
 		case NRF_FUN_UART_CTS:
 			NRF_PSEL_UART(reg, CTS) = psel;
@@ -152,21 +155,12 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt,
 			write = 0U;
 			dir = NRF_GPIO_PIN_DIR_OUTPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
-#if NRF_GPIO_HAS_CLOCKPIN && defined(NRF_SPIM_CLOCKPIN_SCK_NEEDED)
-			clockpin = true;
-#endif
 			break;
 		case NRF_FUN_SPIM_MOSI:
 			NRF_PSEL_SPIM(reg, MOSI) = psel;
 			write = 0U;
 			dir = NRF_GPIO_PIN_DIR_OUTPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
-#if NRF_GPIO_HAS_CLOCKPIN && defined(NRF_SPIM_CLOCKPIN_MOSI_NEEDED)
-			/* CLOCKPIN setting must not be applied to SPIM12x instances. */
-			if (!NRF_SPIM_IS_320MHZ_SPIM((void *)reg)) {
-				clockpin = true;
-			}
-#endif
 			break;
 		case NRF_FUN_SPIM_MISO:
 			NRF_PSEL_SPIM(reg, MISO) = psel;
@@ -179,9 +173,6 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt,
 			NRF_PSEL_SPIS(reg, SCK) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
-#if NRF_GPIO_HAS_CLOCKPIN && defined(NRF_SPIS_CLOCKPIN_SCK_NEEDED)
-			clockpin = true;
-#endif
 			break;
 		case NRF_FUN_SPIS_MOSI:
 			NRF_PSEL_SPIS(reg, MOSI) = psel;
@@ -192,9 +183,6 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt,
 			NRF_PSEL_SPIS(reg, MISO) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
-#if NRF_GPIO_HAS_CLOCKPIN && defined(NRF_SPIS_CLOCKPIN_MISO_NEEDED)
-			clockpin = true;
-#endif
 			break;
 		case NRF_FUN_SPIS_CSN:
 			NRF_PSEL_SPIS(reg, CSN) = psel;
@@ -216,9 +204,6 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt,
 			}
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
-#if NRF_GPIO_HAS_CLOCKPIN && defined(NRF_TWIM_CLOCKPIN_SCL_NEEDED)
-			clockpin = true;
-#endif
 			break;
 		case NRF_FUN_TWIM_SDA:
 			NRF_PSEL_TWIM(reg, SDA) = psel;
@@ -227,9 +212,6 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt,
 			}
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
-#if NRF_GPIO_HAS_CLOCKPIN && defined(NRF_TWIM_CLOCKPIN_SDA_NEEDED)
-			clockpin = true;
-#endif
 			break;
 #endif /* defined(NRF_PSEL_TWIM) */
 #if defined(NRF_PSEL_I2S)
@@ -374,6 +356,24 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt,
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
 			break;
 #endif /* DT_HAS_COMPAT_STATUS_OKAY(nordic_nrf_can) */
+#if defined(NRF_PSEL_TWIS)
+		case NRF_FUN_TWIS_SCL:
+			NRF_PSEL_TWIS(reg, SCL) = psel;
+			if (drive == NRF_GPIO_PIN_S0S1) {
+				drive = NRF_GPIO_PIN_S0D1;
+			}
+			dir = NRF_GPIO_PIN_DIR_INPUT;
+			input = NRF_GPIO_PIN_INPUT_CONNECT;
+			break;
+		case NRF_FUN_TWIS_SDA:
+			NRF_PSEL_TWIS(reg, SDA) = psel;
+			if (drive == NRF_GPIO_PIN_S0S1) {
+				drive = NRF_GPIO_PIN_S0D1;
+			}
+			dir = NRF_GPIO_PIN_DIR_INPUT;
+			input = NRF_GPIO_PIN_INPUT_CONNECT;
+			break;
+#endif /* defined(NRF_PSEL_TWIS) */
 		default:
 			return -ENOTSUP;
 		}
@@ -381,6 +381,22 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt,
 		/* configure GPIO properties */
 		if (psel != PSEL_DISCONNECTED) {
 			uint32_t pin = psel;
+
+#ifdef CONFIG_SOC_NRF54H20_GPD
+			if (NRF_GET_GPD_FAST_ACTIVE1(pins[i]) == 1U) {
+				if (!gpd_requested) {
+					int ret;
+
+					ret = nrf_gpd_request(NRF_GPD_SLOW_ACTIVE);
+					if (ret < 0) {
+						return ret;
+					}
+					gpd_requested = true;
+				}
+
+				nrf_gpio_pin_retain_disable(pin);
+			}
+#endif /* CONFIG_SOC_NRF54H20_GPD */
 
 			if (write != NO_WRITE) {
 				nrf_gpio_pin_write(pin, write);
@@ -395,10 +411,26 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt,
 			nrf_gpio_cfg(pin, dir, input, NRF_GET_PULL(pins[i]),
 				     drive, NRF_GPIO_PIN_NOSENSE);
 #if NRF_GPIO_HAS_CLOCKPIN
-			nrf_gpio_pin_clock_set(pin, clockpin);
+			nrf_gpio_pin_clock_set(pin, NRF_GET_CLOCKPIN_ENABLE(pins[i]));
 #endif
+#ifdef CONFIG_SOC_NRF54H20_GPD
+			if (NRF_GET_GPD_FAST_ACTIVE1(pins[i]) == 1U) {
+				nrf_gpio_pin_retain_enable(pin);
+			}
+#endif /* CONFIG_SOC_NRF54H20_GPD */
 		}
 	}
+
+#ifdef CONFIG_SOC_NRF54H20_GPD
+	if (gpd_requested) {
+		int ret;
+
+		ret = nrf_gpd_release(NRF_GPD_SLOW_ACTIVE);
+		if (ret < 0) {
+			return ret;
+		}
+	}
+#endif
 
 	return 0;
 }

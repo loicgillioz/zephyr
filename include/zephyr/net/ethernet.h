@@ -41,6 +41,8 @@ extern "C" {
 /**
  * @brief Ethernet support functions
  * @defgroup ethernet Ethernet Support Functions
+ * @since 1.0
+ * @version 0.8.0
  * @ingroup networking
  * @{
  */
@@ -56,47 +58,32 @@ struct net_eth_addr {
 
 #define NET_ETH_HDR(pkt) ((struct net_eth_hdr *)net_pkt_data(pkt))
 
+/* zephyr-keep-sorted-start */
+#define NET_ETH_PTYPE_ALL		0x0003 /* from linux/if_ether.h */
+#define NET_ETH_PTYPE_ARP		0x0806
 #define NET_ETH_PTYPE_CAN		0x000C /* CAN: Controller Area Network */
 #define NET_ETH_PTYPE_CANFD		0x000D /* CANFD: CAN flexible data rate*/
-#define NET_ETH_PTYPE_HDLC		0x0019 /* HDLC frames (like in PPP) */
-#define NET_ETH_PTYPE_ARP		0x0806
-#define NET_ETH_PTYPE_IP		0x0800
-#define NET_ETH_PTYPE_TSN		0x22f0 /* TSN (IEEE 1722) packet */
-#define NET_ETH_PTYPE_IPV6		0x86dd
-#define NET_ETH_PTYPE_VLAN		0x8100
-#define NET_ETH_PTYPE_PTP		0x88f7
-#define NET_ETH_PTYPE_LLDP		0x88cc
-#define NET_ETH_PTYPE_ALL               0x0003 /* from linux/if_ether.h */
-#define NET_ETH_PTYPE_ECAT		0x88a4
 #define NET_ETH_PTYPE_EAPOL		0x888e
+#define NET_ETH_PTYPE_ECAT		0x88a4
+#define NET_ETH_PTYPE_HDLC		0x0019 /* HDLC frames (like in PPP) */
 #define NET_ETH_PTYPE_IEEE802154	0x00F6 /* from linux/if_ether.h: IEEE802.15.4 frame */
+#define NET_ETH_PTYPE_IP		0x0800
+#define NET_ETH_PTYPE_IPV6		0x86dd
+#define NET_ETH_PTYPE_LLDP		0x88cc
+#define NET_ETH_PTYPE_PTP		0x88f7
+#define NET_ETH_PTYPE_TSN		0x22f0 /* TSN (IEEE 1722) packet */
+#define NET_ETH_PTYPE_VLAN		0x8100
+/* zephyr-keep-sorted-stop */
 
-#if !defined(ETH_P_ALL)
-#define ETH_P_ALL	NET_ETH_PTYPE_ALL
-#endif
-#if !defined(ETH_P_IP)
-#define ETH_P_IP	NET_ETH_PTYPE_IP
-#endif
-#if !defined(ETH_P_ARP)
-#define ETH_P_ARP	NET_ETH_PTYPE_ARP
-#endif
-#if !defined(ETH_P_IPV6)
-#define ETH_P_IPV6	NET_ETH_PTYPE_IPV6
-#endif
+/* zephyr-keep-sorted-start re(^#define) */
 #if !defined(ETH_P_8021Q)
 #define ETH_P_8021Q	NET_ETH_PTYPE_VLAN
 #endif
-#if !defined(ETH_P_TSN)
-#define ETH_P_TSN	NET_ETH_PTYPE_TSN
+#if !defined(ETH_P_ALL)
+#define ETH_P_ALL	NET_ETH_PTYPE_ALL
 #endif
-#if !defined(ETH_P_ECAT)
-#define  ETH_P_ECAT	NET_ETH_PTYPE_ECAT
-#endif
-#if !defined(ETH_P_EAPOL)
-#define ETH_P_EAPOL	NET_ETH_PTYPE_EAPOL
-#endif
-#if !defined(ETH_P_IEEE802154)
-#define  ETH_P_IEEE802154 NET_ETH_PTYPE_IEEE802154
+#if !defined(ETH_P_ARP)
+#define ETH_P_ARP	NET_ETH_PTYPE_ARP
 #endif
 #if !defined(ETH_P_CAN)
 #define ETH_P_CAN	NET_ETH_PTYPE_CAN
@@ -104,9 +91,28 @@ struct net_eth_addr {
 #if !defined(ETH_P_CANFD)
 #define ETH_P_CANFD	NET_ETH_PTYPE_CANFD
 #endif
+#if !defined(ETH_P_EAPOL)
+#define ETH_P_EAPOL	NET_ETH_PTYPE_EAPOL
+#endif
+#if !defined(ETH_P_ECAT)
+#define ETH_P_ECAT	NET_ETH_PTYPE_ECAT
+#endif
 #if !defined(ETH_P_HDLC)
 #define ETH_P_HDLC	NET_ETH_PTYPE_HDLC
 #endif
+#if !defined(ETH_P_IEEE802154)
+#define ETH_P_IEEE802154 NET_ETH_PTYPE_IEEE802154
+#endif
+#if !defined(ETH_P_IP)
+#define ETH_P_IP	NET_ETH_PTYPE_IP
+#endif
+#if !defined(ETH_P_IPV6)
+#define ETH_P_IPV6	NET_ETH_PTYPE_IPV6
+#endif
+#if !defined(ETH_P_TSN)
+#define ETH_P_TSN	NET_ETH_PTYPE_TSN
+#endif
+/* zephyr-keep-sorted-stop */
 
 /** @endcond */
 
@@ -202,6 +208,12 @@ enum ethernet_hw_caps {
 
 	/** TX-Injection supported */
 	ETHERNET_TXINJECTION_MODE	= BIT(20),
+
+	/** 2.5 Gbits link supported */
+	ETHERNET_LINK_2500BASE_T	= BIT(21),
+
+	/** 5 Gbits link supported */
+	ETHERNET_LINK_5000BASE_T	= BIT(22),
 };
 
 /** @cond INTERNAL_HIDDEN */
@@ -222,7 +234,8 @@ enum ethernet_config_type {
 	ETHERNET_CONFIG_TYPE_T1S_PARAM,
 	ETHERNET_CONFIG_TYPE_TXINJECTION_MODE,
 	ETHERNET_CONFIG_TYPE_RX_CHECKSUM_SUPPORT,
-	ETHERNET_CONFIG_TYPE_TX_CHECKSUM_SUPPORT
+	ETHERNET_CONFIG_TYPE_TX_CHECKSUM_SUPPORT,
+	ETHERNET_CONFIG_TYPE_EXTRA_TX_PKT_HEADROOM,
 };
 
 enum ethernet_qav_param_type {
@@ -517,6 +530,8 @@ struct ethernet_config {
 		enum ethernet_checksum_support chksum_support;
 
 		struct ethernet_filter filter;
+
+		uint16_t extra_tx_pkt_headroom;
 	};
 };
 
@@ -571,6 +586,9 @@ struct ethernet_api {
 #if defined(CONFIG_PTP_CLOCK)
 	const struct device *(*get_ptp_clock)(const struct device *dev);
 #endif /* CONFIG_PTP_CLOCK */
+
+	/** Return PHY device that is tied to this ethernet device */
+	const struct device *(*get_phy)(const struct device *dev);
 
 	/** Send a network packet */
 	int (*send)(const struct device *dev, struct net_pkt *pkt);
@@ -648,7 +666,7 @@ struct ethernet_context {
 	atomic_t flags;
 
 #if defined(CONFIG_NET_ETHERNET_BRIDGE)
-	struct eth_bridge_iface_context bridge;
+	struct net_if *bridge;
 #endif
 
 	/** Carrier ON/OFF handler worker. This is used to create
@@ -928,14 +946,14 @@ void net_eth_ipv6_mcast_to_mac_addr(const struct in6_addr *ipv6_addr,
 static inline
 enum ethernet_hw_caps net_eth_get_hw_capabilities(struct net_if *iface)
 {
-	const struct ethernet_api *eth =
-		(struct ethernet_api *)net_if_get_device(iface)->api;
+	const struct device *dev = net_if_get_device(iface);
+	const struct ethernet_api *api = (struct ethernet_api *)dev->api;
 
-	if (!eth->get_capabilities) {
+	if (!api || !api->get_capabilities) {
 		return (enum ethernet_hw_caps)0;
 	}
 
-	return eth->get_capabilities(net_if_get_device(iface));
+	return api->get_capabilities(dev);
 }
 
 /**
@@ -1247,6 +1265,16 @@ static inline bool net_eth_is_vlan_interface(struct net_if *iface)
 	ETH_NET_DEVICE_DT_DEFINE(DT_DRV_INST(inst), __VA_ARGS__)
 
 /**
+ * @brief Ethernet L3 protocol register macro.
+ *
+ * @param name Name of the L3 protocol.
+ * @param ptype Ethernet protocol type.
+ * @param handler Handler function for this protocol type.
+ */
+#define ETH_NET_L3_REGISTER(name, ptype, handler) \
+	NET_L3_REGISTER(&NET_L2_GET_NAME(ETHERNET), name, ptype, handler)
+
+/**
  * @brief Inform ethernet L2 driver that ethernet carrier is detected.
  * This happens when cable is connected.
  *
@@ -1296,6 +1324,16 @@ int net_eth_txinjection_mode(struct net_if *iface, bool enable);
  */
 int net_eth_mac_filter(struct net_if *iface, struct net_eth_addr *mac,
 		       enum ethernet_filter_type type, bool enable);
+
+/**
+ * @brief Return the PHY device that is tied to this ethernet network interface.
+ *
+ * @param iface Network interface
+ *
+ * @return Pointer to PHY device if found, NULL if not found.
+ */
+const struct device *net_eth_get_phy(struct net_if *iface);
+
 /**
  * @brief Return PTP clock that is tied to this ethernet network interface.
  *

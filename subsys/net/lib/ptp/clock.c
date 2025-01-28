@@ -262,7 +262,7 @@ const struct ptp_clock *ptp_clock_init(void)
 	dds->n_ports = 0;
 	dds->time_receiver_only = IS_ENABLED(CONFIG_PTP_TIME_RECEIVER_ONLY) ? true : false;
 
-	dds->clk_quality.class = dds->time_receiver_only ? 255 : 248;
+	dds->clk_quality.cls = dds->time_receiver_only ? 255 : 248;
 	dds->clk_quality.accuracy = CONFIG_PTP_CLOCK_ACCURACY;
 	/* 0xFFFF means that value has not been computed - IEEE 1588-2019 7.6.3.3 */
 	dds->clk_quality.offset_scaled_log_variance = 0xFFFF;
@@ -523,13 +523,24 @@ void ptp_clock_synchronize(uint64_t ingress, uint64_t egress)
 	/* If diff is too big, ptp_clk needs to be set first. */
 	if ((offset > (int64_t)NSEC_PER_SEC) || (offset < -(int64_t)NSEC_PER_SEC)) {
 		struct net_ptp_time current;
+		int32_t dest_nsec;
 
 		LOG_WRN("Clock offset exceeds 1 second.");
 
 		ptp_clock_get(ptp_clk.phc, &current);
 
-		current.second -= (uint64_t)(offset / NSEC_PER_SEC);
-		current.nanosecond -= (uint32_t)(offset % NSEC_PER_SEC);
+		current.second = (uint64_t)(current.second - (offset / NSEC_PER_SEC));
+		dest_nsec = (int32_t)(current.nanosecond - (offset % NSEC_PER_SEC));
+
+		if (dest_nsec < 0) {
+			current.second--;
+			dest_nsec += NSEC_PER_SEC;
+		} else if (dest_nsec >= NSEC_PER_SEC) {
+			current.second++;
+			dest_nsec -= NSEC_PER_SEC;
+		}
+
+		current.nanosecond = (uint32_t)dest_nsec;
 
 		ptp_clock_set(ptp_clk.phc, &current);
 		return;
@@ -538,7 +549,7 @@ void ptp_clock_synchronize(uint64_t ingress, uint64_t egress)
 	LOG_DBG("Offset %lldns", offset);
 	ptp_clk.current_ds.offset_from_tt = clock_ns_to_timeinterval(offset);
 
-	ptp_clock_adjust(ptp_clk.phc, offset);
+	ptp_clock_adjust(ptp_clk.phc, -offset);
 }
 
 void ptp_clock_delay(uint64_t egress, uint64_t ingress)

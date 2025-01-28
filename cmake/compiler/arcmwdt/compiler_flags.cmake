@@ -116,7 +116,7 @@ set_compiler_property(PROPERTY warning_error_misra_sane -Werror=vla)
 set_compiler_property(PROPERTY cstd -std=)
 
 if (NOT CONFIG_ARCMWDT_LIBC)
-  set_compiler_property(PROPERTY nostdinc -Hno_default_include -Hnoarcexlib)
+  set_compiler_property(PROPERTY nostdinc -Hno_default_include -Hnoarcexlib -U__STDC_LIB_EXT1__)
   set_compiler_property(APPEND PROPERTY nostdinc_include ${NOSTDINC})
 endif()
 
@@ -167,7 +167,9 @@ set_compiler_property(PROPERTY imacros -imacros)
 
 # Security canaries.
 #no support of -mstack-protector-guard=global"
-set_compiler_property(PROPERTY security_canaries -fstack-protector-all)
+set_compiler_property(PROPERTY security_canaries -fstack-protector)
+set_compiler_property(PROPERTY security_canaries_strong -fstack-protector-strong)
+set_compiler_property(PROPERTY security_canaries_all -fstack-protector-all)
 
 #no support of _FORTIFY_SOURCE"
 set_compiler_property(PROPERTY security_fortify_compile_time)

@@ -16,6 +16,8 @@
 /**
  * @brief TLS credentials management
  * @defgroup tls_credentials TLS credentials management
+ * @since 1.13
+ * @version 0.8.0
  * @ingroup networking
  * @{
  */
@@ -105,6 +107,7 @@ int tls_credential_add(sec_tag_t tag, enum tls_credential_type type,
  * @retval -EACCES Access to the TLS credential subsystem was denied.
  * @retval -ENOENT Requested TLS credential was not found.
  * @retval -EFBIG Requested TLS credential does not fit in the buffer provided.
+ *                Check *credlen for size required.
  */
 int tls_credential_get(sec_tag_t tag, enum tls_credential_type type,
 		       void *cred, size_t *credlen);

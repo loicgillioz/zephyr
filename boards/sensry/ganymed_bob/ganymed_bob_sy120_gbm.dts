@@ -1,0 +1,18 @@
+/* Copyright (c) 2024 sensry.io */
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/dts-v1/;
+
+#include <sensry/ganymed-sy1xx.dtsi>
+#include "ganymed_bob_sy120-pinctrl.dtsi"
+
+/ {
+
+	chosen {
+		zephyr,code-partition = &l2_ram_text;
+		zephyr,sram = &l2_ram_data;
+
+		zephyr,console = &uart0;
+	};
+
+};

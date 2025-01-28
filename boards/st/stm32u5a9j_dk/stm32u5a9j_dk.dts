@@ -204,7 +204,7 @@ uart0: &usart3 {
 &adc1 {
 	pinctrl-0 = <&adc1_in5_pa0 &adc1_in14_pc5>;
 	pinctrl-names = "default";
-	st,adc-clock-source = <ASYNC>;
+	st,adc-clock-source = "ASYNC";
 	st,adc-prescaler = <1>;
 	status = "okay";
 
@@ -231,7 +231,7 @@ uart0: &usart3 {
 &adc4 {
 	pinctrl-0 = <&adc4_in5_pf14>;
 	pinctrl-names = "default";
-	st,adc-clock-source = <ASYNC>;
+	st,adc-clock-source = "ASYNC";
 	st,adc-prescaler = <1>;
 	status = "okay";
 
@@ -245,6 +245,12 @@ uart0: &usart3 {
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
 		zephyr,resolution = <12>;
 	};
+};
+
+zephyr_udc0: &usbotg_hs {
+	pinctrl-0 = <&usb_otg_hs_dm_pa11 &usb_otg_hs_dp_pa12>;
+	pinctrl-names = "default";
+	status = "okay";
 };
 
 &flash0 {

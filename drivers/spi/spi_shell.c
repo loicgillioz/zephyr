@@ -17,6 +17,10 @@
 #define CONF_ARGV_FREQUENCY (2)
 #define CONF_ARGV_SETTINGS  (3)
 
+#define CS_ARGV_GPIO_DEV    (1)
+#define CS_ARGV_GPIO_PIN    (2)
+#define CS_ARGV_GPIO_FLAGS  (3)
+
 /* Maximum bytes we can write and read at once */
 #define MAX_SPI_BYTES MIN((CONFIG_SHELL_ARGC_MAX - TXRX_ARGV_BYTES), 32)
 
@@ -80,7 +84,7 @@ static int cmd_spi_conf(const struct shell *ctx, size_t argc, char **argv)
 
 	/* warning: initialization discards 'const' qualifier from pointer */
 	/* target type */
-	struct device *dev = (struct device *)device_get_binding(argv[CONF_ARGV_DEV]);
+	struct device *dev = (struct device *)shell_device_get_binding(argv[CONF_ARGV_DEV]);
 
 	if (dev == NULL) {
 		shell_error(ctx, "device %s not found.", argv[CONF_ARGV_DEV]);
@@ -135,17 +139,57 @@ out:
 	return 0;
 }
 
+static int cmd_spi_conf_cs(const struct shell *ctx, size_t argc, char **argv)
+{
+	struct device *dev = (struct device *)shell_device_get_binding(argv[CS_ARGV_GPIO_DEV]);
+	char *endptr = NULL;
+
+	if (dev == NULL) {
+		shell_error(ctx, "device %s not found.", argv[CS_ARGV_GPIO_DEV]);
+		return -ENODEV;
+	}
+
+	int pin = strtol(argv[CS_ARGV_GPIO_PIN], &endptr, 10);
+
+	if (endptr == argv[CS_ARGV_GPIO_PIN] || (pin < 0)) {
+		shell_error(ctx, "invalid pin number: %s", argv[CS_ARGV_GPIO_PIN]);
+		return -EINVAL;
+	}
+
+	config.cs.gpio.port = dev;
+	config.cs.gpio.pin = pin;
+
+	/* Include flags if provided */
+	if (argc == (CS_ARGV_GPIO_FLAGS + 1)) {
+		uint32_t flags = strtol(argv[CS_ARGV_GPIO_FLAGS], &endptr, 16);
+
+		if (endptr == argv[CS_ARGV_GPIO_FLAGS]) {
+			shell_error(ctx, "invalid gpio flags: %s", argv[CS_ARGV_GPIO_FLAGS]);
+			return -EINVAL;
+		}
+
+		config.cs.gpio.dt_flags = flags;
+	}
+
+	return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_spi_cmds,
 			       SHELL_CMD_ARG(conf, &dsub_device_name,
 					     "Configure SPI\n"
 					     "Usage: spi conf <device> <frequency> [<settings>]\n"
-					     "<settings> - any sequence of letters:"
+					     "<settings> - any sequence of letters:\n"
 					     "o - SPI_MODE_CPOL\n"
 					     "h - SPI_MODE_CPHA\n"
 					     "l - SPI_TRANSFER_LSB\n"
 					     "T - SPI_FRAME_FORMAT_TI\n"
 					     "example: spi conf spi1 1000000 ol",
 					     cmd_spi_conf, 3, 1),
+			       SHELL_CMD_ARG(cs, &dsub_device_name,
+					     "Assign CS GPIO to SPI device\n"
+					     "Usage: spi cs <gpio-device> <pin> [<gpio flags>]"
+					     "example: spi conf gpio1 3 0x01",
+					     cmd_spi_conf_cs, 3, 1),
 			       SHELL_CMD_ARG(transceive, NULL,
 					     "Transceive data to and from an SPI device\n"
 					     "Usage: spi transceive <TX byte 1> [<TX byte 2> ...]",

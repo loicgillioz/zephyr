@@ -13,9 +13,9 @@
 #include <xtensa/corebits.h>
 #include <esp_private/spi_flash_os.h>
 #include <esp_private/esp_mmu_map_private.h>
+#include <esp_flash_internal.h>
 #if CONFIG_ESP_SPIRAM
-#include <esp_psram.h>
-#include <esp_private/esp_psram_extram.h>
+#include "psram.h"
 #endif
 
 #include <zephyr/kernel_structs.h>
@@ -41,53 +41,13 @@
 #endif /* CONFIG_SOC_ENABLE_APPCPU */
 
 #include <zephyr/sys/printk.h>
+#include "esp_log.h"
 
-#if CONFIG_ESP_SPIRAM
-extern int _ext_ram_bss_start;
-extern int _ext_ram_bss_end;
-#endif
+#define TAG "boot.esp32"
 
-extern void z_cstart(void);
+extern void z_prep_c(void);
 extern void esp_reset_reason_init(void);
-
-#ifdef CONFIG_SOC_ENABLE_APPCPU
-extern const unsigned char esp32_appcpu_fw_array[];
-
-void IRAM_ATTR esp_start_appcpu(void)
-{
-	esp_image_header_t *header = (esp_image_header_t *)&esp32_appcpu_fw_array[0];
-	esp_image_segment_header_t *segment =
-		(esp_image_segment_header_t *)&esp32_appcpu_fw_array[sizeof(esp_image_header_t)];
-	uint8_t *segment_payload;
-	uint32_t entry_addr = header->entry_addr;
-	uint32_t idx = sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t);
-
-	for (int i = 0; i < header->segment_count; i++) {
-		segment_payload = (uint8_t *)&esp32_appcpu_fw_array[idx];
-
-		if (segment->load_addr >= SOC_IRAM_LOW && segment->load_addr < SOC_IRAM_HIGH) {
-			/* IRAM segment only accepts 4 byte access, avoid memcpy usage here */
-			volatile uint32_t *src = (volatile uint32_t *)segment_payload;
-			volatile uint32_t *dst = (volatile uint32_t *)segment->load_addr;
-
-			for (int j = 0; j < segment->data_len / 4; j++) {
-				dst[j] = src[j];
-			}
-		} else if (segment->load_addr >= SOC_DRAM_LOW &&
-			   segment->load_addr < SOC_DRAM_HIGH) {
-
-			memcpy((void *)segment->load_addr, (const void *)segment_payload,
-			       segment->data_len);
-		}
-
-		idx += segment->data_len;
-		segment = (esp_image_segment_header_t *)&esp32_appcpu_fw_array[idx];
-		idx += sizeof(esp_image_segment_header_t);
-	}
-
-	esp_appcpu_start((void *)entry_addr);
-}
-#endif /* CONFIG_SOC_ENABLE_APPCPU */
+extern int esp_appcpu_init(void);
 
 /*
  * This is written in C rather than assembly since, during the port bring up,
@@ -99,28 +59,18 @@ void IRAM_ATTR __esp_platform_start(void)
 	extern uint32_t _init_start;
 
 	/* Move the exception vector table to IRAM. */
-	__asm__ __volatile__ (
-		"wsr %0, vecbase"
-		:
-		: "r"(&_init_start));
+	__asm__ __volatile__ ("wsr %0, vecbase" : : "r"(&_init_start));
 
 	z_bss_zero();
 
-	__asm__ __volatile__ (
-		""
-		:
-		: "g"(&__bss_start)
-		: "memory");
+	__asm__ __volatile__ ("" : : "g"(&__bss_start) : "memory");
 
 	/* Disable normal interrupts. */
-	__asm__ __volatile__ (
-		"wsr %0, PS"
-		:
-		: "r"(PS_INTLEVEL(XCHAL_EXCM_LEVEL) | PS_UM | PS_WOE));
+	__asm__ __volatile__ ("wsr %0, PS" : : "r"(PS_INTLEVEL(XCHAL_EXCM_LEVEL) | PS_UM | PS_WOE));
 
 	/* Initialize the architecture CPU pointer.  Some of the
 	 * initialization code wants a valid _current before
-	 * arch_kernel_init() is invoked.
+	 * z_prep_c() is invoked.
 	 */
 	__asm__ __volatile__("wsr.MISC0 %0; rsync" : : "r"(&_kernel.cpus[0]));
 
@@ -139,56 +89,31 @@ void IRAM_ATTR __esp_platform_start(void)
 
 	esp_timer_early_init();
 
-#if CONFIG_SOC_ENABLE_APPCPU
-	/* start the ESP32 APP CPU */
-	esp_start_appcpu();
-#endif
+	esp_mspi_pin_init();
+
+	esp_flash_app_init();
 
 	esp_mmu_map_init();
 
-#ifdef CONFIG_SOC_FLASH_ESP32
-	esp_mspi_pin_init();
-	spi_flash_init_chip_state();
-#endif
-
 #if CONFIG_ESP_SPIRAM
-	esp_err_t err = esp_psram_init();
-
-	if (err != ESP_OK) {
-		printk("Failed to Initialize SPIRAM, aborting.\n");
-		abort();
-	}
-	if (esp_psram_get_size() < CONFIG_ESP_SPIRAM_SIZE) {
-		printk("SPIRAM size is less than configured size, aborting.\n");
-		abort();
-	}
-
-	if (esp_psram_is_initialized()) {
-		if (!esp_psram_extram_test()) {
-			printk("External RAM failed memory test!");
-			abort();
-		}
-	}
-
-	memset(&_ext_ram_bss_start, 0,
-	       (&_ext_ram_bss_end - &_ext_ram_bss_start) * sizeof(_ext_ram_bss_start));
+	esp_init_psram();
 #endif /* CONFIG_ESP_SPIRAM */
-
-/* Scheduler is not started at this point. Hence, guard functions
- * must be initialized after esp_spiram_init_cache which internally
- * uses guard functions. Setting guard functions before SPIRAM
- * cache initialization will result in a crash.
- */
-#if CONFIG_SOC_FLASH_ESP32 || CONFIG_ESP_SPIRAM
-	spi_flash_guard_set(&g_flash_guard_default_ops);
-#endif
 
 #endif /* !CONFIG_MCUBOOT */
 
 	esp_intr_initialize();
 
+#if CONFIG_ESP_SPIRAM
+	/* Init Shared Multi Heap for PSRAM */
+	int err = esp_psram_smh_init();
+
+	if (err) {
+		printk("Failed to initialize PSRAM shared multi heap (%d)\n", err);
+	}
+#endif
+
 	/* Start Zephyr */
-	z_cstart();
+	z_prep_c();
 
 	CODE_UNREACHABLE;
 }
@@ -207,3 +132,8 @@ void sys_arch_reboot(int type)
 {
 	esp_restart_noos();
 }
+
+#if defined(CONFIG_SOC_ENABLE_APPCPU) && !defined(CONFIG_MCUBOOT)
+extern int esp_appcpu_init(void);
+SYS_INIT(esp_appcpu_init, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+#endif
