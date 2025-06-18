@@ -142,7 +142,7 @@ manifest:
       groups:
         - hal
     - name: hal_altera
-      revision: 0d225ddd314379b32355a00fb669eacf911e750d
+      revision: 4fe4df959d4593ce66e676aeba0b57f546dba0fe
       path: modules/hal/altera
       groups:
         - hal
@@ -310,7 +310,7 @@ manifest:
       path: modules/lib/openthread
     - name: percepio
       path: modules/debug/percepio
-      revision: 1a67f3e2dbc2a8d53e5248d72bac946db381692d
+      revision: a49e5f3947faad0dd654eddd5a750127fb81e50d
       groups:
         - debug
     - name: picolibc
@@ -327,7 +327,7 @@ manifest:
       groups:
         - crypto
     - name: trusted-firmware-m
-      revision: f8d3a903578192d226ac1552f383d95b94ee8780
+      revision: 069455be098383bf96eab73e3ff8e0c66c60fa5a
       path: modules/tee/tf-m/trusted-firmware-m
       groups:
         - tee
