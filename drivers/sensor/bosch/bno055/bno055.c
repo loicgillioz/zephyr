@@ -339,7 +339,13 @@ static int bno055_chip_init(const struct device *dev)
 			LOG_DBG("CALIB_STAT read failed: %d", err);
 			return err;
 		}
-		LOG_DBG("Calibration status: %02x", calib_status);
+		uint8_t mag = calib_status & 0x03;
+		uint8_t acc = (calib_status >> 2) & 0x03;
+		uint8_t gyr = (calib_status >> 4) & 0x03;
+		uint8_t sys = (calib_status >> 6) & 0x03;
+		LOG_DBG("Calibration status: 0x%02x (SYS:%u GYR:%u ACC:%u MAG:%u)", calib_status, sys, gyr, acc, mag);
+
+
 		k_msleep(1000);
 	}
 	while((calib_status | 0xc0) != 0xFF);
