@@ -269,6 +269,8 @@ static int modbus_rtu_rx_adu(struct modbus_context *ctx)
 	calc_crc = crc16_ansi(&cfg->uart_buf[0],
 			      cfg->uart_buf_ctr - sizeof(ctx->rx_adu.crc));
 
+	LOG_HEXDUMP_DBG(ctx->rx_adu.data, ctx->rx_adu.length, "uart_rx_buf");
+
 	if (ctx->rx_adu.crc != calc_crc) {
 		LOG_WRN("Calculated CRC does not match received CRC");
 		return -EIO;
