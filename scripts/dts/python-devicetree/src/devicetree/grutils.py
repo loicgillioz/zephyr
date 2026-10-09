@@ -19,18 +19,20 @@ class Graph:
     """
 
     def __init__(self, root=None):
+        # Insertion-ordered dicts, not sets: set order follows object ids, so a
+        # pickled EDT would differ between identical runs.
         self.__roots = None
         if root is not None:
-            self.__roots = {root}
-        self.__edge_map = collections.defaultdict(set)
-        self.__reverse_map = collections.defaultdict(set)
-        self.__nodes = set()
+            self.__roots = {root: None}
+        self.__edge_map = collections.defaultdict(dict)
+        self.__reverse_map = collections.defaultdict(dict)
+        self.__nodes = {}
 
     def add_node(self, node):
         """
         Add a node without any target to the graph.
         """
-        self.__nodes.add(node)
+        self.__nodes[node] = None
 
     def add_edge(self, source, target):
         """
@@ -38,11 +40,11 @@ class Graph:
 
         The nodes are added to the graph if necessary.
         """
-        self.__edge_map[source].add(target)
+        self.__edge_map[source][target] = None
         if source != target:
-            self.__reverse_map[target].add(source)
-        self.__nodes.add(source)
-        self.__nodes.add(target)
+            self.__reverse_map[target][source] = None
+        self.__nodes[source] = None
+        self.__nodes[target] = None
 
     def roots(self):
         """
@@ -54,10 +56,10 @@ class Graph:
         @rtype: C{set}
         """
         if not self.__roots:
-            self.__roots = set()
+            self.__roots = {}
             for n in self.__nodes:
                 if n not in self.__reverse_map:
-                    self.__roots.add(n)
+                    self.__roots[n] = None
         return self.__roots
 
     def _tarjan(self):
