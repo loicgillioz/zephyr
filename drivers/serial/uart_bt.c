@@ -133,22 +133,30 @@ static void tx_work_handler(struct k_work *work)
 
 	__ASSERT_NO_MSG(dev_data);
 
-	uint16_t chunk_size = get_max_chunk_size();
-	do {
-		/** The chunk size is based on the smallest MTU among all
-		 * peers, and the same chunk is sent to everyone. This avoids
-		 * managing separate read pointers: one per connection.
-		 */
-		len = ring_buf_get_claim(dev_data->uart.tx_ringbuf, &data, chunk_size);
-		if (len > 0) {
-			err = bt_nus_inst_send(NULL, dev_data->bt.inst, data, len);
-			if (err) {
-				LOG_ERR("Failed to send data over BT: %d", err);
-			}
+	if (!atomic_get(&dev_data->bt.enabled)) {
+		/* Output queued for a peer that is gone must not reach the next one. */
+		while ((len = ring_buf_get_claim(dev_data->uart.tx_ringbuf, &data, UINT32_MAX)) > 0) {
+			ring_buf_get_finish(dev_data->uart.tx_ringbuf, len);
 		}
+	} else {
+		uint16_t chunk_size = get_max_chunk_size();
 
-		ring_buf_get_finish(dev_data->uart.tx_ringbuf, len);
-	} while (len > 0 && !err);
+		do {
+			/** The chunk size is based on the smallest MTU among all
+			 * peers, and the same chunk is sent to everyone. This avoids
+			 * managing separate read pointers: one per connection.
+			 */
+			len = ring_buf_get_claim(dev_data->uart.tx_ringbuf, &data, chunk_size);
+			if (len > 0) {
+				err = bt_nus_inst_send(NULL, dev_data->bt.inst, data, len);
+				if (err) {
+					LOG_ERR("Failed to send data over BT: %d", err);
+				}
+			}
+
+			ring_buf_get_finish(dev_data->uart.tx_ringbuf, len);
+		} while (len > 0 && !err);
+	}
 
 	if ((ring_buf_space_get(dev_data->uart.tx_ringbuf) > 0) && dev_data->uart.tx_irq_ena) {
 		k_work_submit_to_queue(&nus_work_queue, &dev_data->uart.cb_work);
